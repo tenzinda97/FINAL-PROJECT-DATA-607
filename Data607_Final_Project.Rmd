@@ -1,0 +1,214 @@
+---
+title: "Data 607 Final Project"
+author: "Nfn Tenzin Dakar"
+date: "2024-12-11"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+# Introduction
+
+For this final project, I will be working alone. I am going to analyze a dataset that holds data for the Real-Estate industry as reported by Zestimate. Zestimate was created to give consumers as much information as possible about homes and the housing market, marking the first time consumers had access to this type of home value information at no cost
+
+# Data Source
+
+Datasets are available at: https://www.kaggle.com/c/zillow-prize-1/data File descriptions
+
+properties_2016.csv - all the properties_2017 with their home features for 2016.
+properties_2017.csv - all the properties_2017 with their home features for 2017
+train_2016.csv - the training set with transactions from 1/1/2016 to 12/31/2016
+train_2017.csv - the training set with transactions from 1/1/2017 to 9/15/2017
+sample_submission.csv - a sample submission file in the correct format
+zillow_data_dictionary.xlsx - definition of data fields
+
+# Project Goal
+I seek to establish an understanding of the relationship between home prices and characteristcs of housing as described in Zestimate’s datasets. I will draw a relation to factors such as economic forces, home features, and geographical inequality; and their impact on prices of homes.
+
+I will exhaustively apply the various concepts that I have learnt this far, to come up with a good analysis report of this dataset.
+
+# Loading Libraries
+
+
+```{r}
+library(tidyverse)
+library(psych)
+library(dplyr)
+library(shiny)
+library(leaflet)
+library(ggmap)
+library(data.table)
+library(ggplot2)
+library(scales)
+library(magrittr)
+library(bit64)
+library(lubridate)
+library(corrplot)
+library(h2o)
+library(lime)
+library(lubridate)
+library(magrittr)
+library(data.table)
+library(bit64)
+library(tidyverse)
+library(lubridate)
+library(mice)
+library(corrplot)
+```
+
+## Reading the csv file
+```{r}
+properties_2017 <-  read.csv(file="C:\\Users\\tenzi\\OneDrive\\Documents\\Data607\\Final Project\\properties_2017.csv", row.names = NULL)
+str(properties_2017)
+```
+# DATA TRANSFORMATION
+# Missing Data
+
+```{r}
+prop_miss <- function(x){
+  sum(is.na(x)) / length(x)*100
+}
+
+missing.bycol <- apply(properties_2017,2,prop_miss)
+missing.byrow <-  apply(properties_2017,1,prop_miss)
+
+missdata.df <- as.data.frame(missing.bycol)
+setDT(missdata.df, keep.rownames = TRUE)
+names(missdata.df) <- c('Col_Names', 'pct_missing')
+
+plt1<-ggplot(data = missdata.df , aes(x= reorder(Col_Names, pct_missing), y=pct_missing)) + geom_bar(stat = "identity",aes(fill = pct_missing), position = position_stack(reverse= TRUE)) + coord_flip()
+plt1
+```
+# Columns with more than 20% missing value
+```{r}
+missdata.df20 <- missdata.df %>% filter (pct_missing>=20) 
+plt2<-ggplot(data = missdata.df20  , aes(x= reorder(Col_Names, pct_missing), y=pct_missing)) + geom_bar(stat = "identity",aes(fill = pct_missing), position = position_stack(reverse= TRUE)) + coord_flip()
+plt2
+```
+Using the 80% rule, missing values in more than 20% of samples may be removed from the dataset.
+```{r}
+missing_prop <- sapply(properties_2017, function(x) sum(is.na(x))/length(x))
+variables_to_remove <- names(missing_prop)[missing_prop > 1 - 0.8]
+variables_to_remove 
+```
+```{r}
+# The dataset afterwards
+df_transformed <- properties_2017[, !colnames(properties_2017) %in% variables_to_remove]
+dim(df_transformed)
+```
+```{r}
+str(df_transformed)
+```
+The dataset now has 29 variables, which I will use for the rest of my analysis.
+
+# DATA ANALYSIS
+# Variables
+```{r}
+#Subset of columns from original data set
+col_index<-c(2:9)
+working_set<-df_transformed[,col_index]
+head(working_set)
+```
+```{r}
+# proportion of each level under each variable using the table and summary functions
+
+# Bedroom Count: nummber of bedrooms in a home 
+table(working_set$bedroomcnt)
+## 
+```
+```{r}
+summary(working_set$bedroomcnt)
+```
+```{r}
+boxplot(working_set$bedroomcnt)
+```
+```{r}
+# Bathroom count: Number of bathrooms in home
+bathroomcnt<-table(working_set$bathroomcnt)
+bathroomcnt
+```
+```{r}
+summary(working_set$bathroomcnt)
+```
+```{r}
+# Calculated Bathroom number: Number of bathrooms in home including fractional bathroom
+table(working_set$calculatedbathnbr)
+```
+```{r}
+summary(working_set$calculatedbathnbr)
+```
+```{r}
+barplot(bathroomcnt, main = "Bathroom Count")
+```
+```{r}
+# Full bath count: Number of full bathrooms (sink, shower + bathtub, and toilet) present in home
+
+fullbath<-table(working_set$fullbathcnt)
+fullbath
+```
+```{r}
+summary(working_set$fullbathcnt)
+```
+```{r}
+barplot(fullbath, main = " Full Bath Count")
+```
+```{r}
+boxplot(working_set$fullbathcnt)
+```
+```{r}
+# Hot Tub or Spa: whether or not a home has a hot tub or spa
+summary(working_set$hashottuborspa)
+```
+```{r}
+#Finished Square Feet: Finished total living room area of home
+summary(working_set$finishedsquarefeet12)
+```
+# Land properties_2017
+
+```{r}
+# Regionidcity
+properties_2017 %>% 
+  count(regionidcity)
+```
+
+```{r}
+# geographic interactive widget to display where regionid is in relation to a regional map
+
+city_info <- colorFactor("Set2", properties_2017$regionidcity)
+
+df_transformed %>% 
+  group_by(regionidcity = as.factor(regionidcity)) %>% 
+  summarise(avg_lng = mean(longitude/1e6, na.rm = T),
+            avg_lat = mean(latitude/1e6, na.rm =T)) %>% 
+  leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(lng = ~avg_lng, lat = ~avg_lat, color = ~city_info(regionidcity),
+                   stroke = FALSE, fillOpacity = 0.8, popup = ~regionidcity)
+```
+
+```{r}
+col_index<-c(10,11,16,23:29)
+working_dataset2<-df_transformed[,col_index]
+
+
+# Landtaxvaluedollarcnt: The assessed value of the land area of the parcel
+summary(working_dataset2$landtaxvaluedollarcnt)
+```
+```{r}
+# Structuretaxvaluedollarcnt: The assessed value of the built structure on the parcel
+summary(working_dataset2$structuretaxvaluedollarcnt)
+```
+```{r}
+#Taxvaluedollarcnt: The total tax assessed value of the parcel
+summary(working_dataset2$taxvaluedollarcnt)
+```
+```{r}
+# Taxamount: The total property tax assessed for that assessment year
+plt <- qplot(working_dataset2$taxamount, geom="histogram", binwidth = 1000, main = "Distribution of Tax Amount", ylab =    "Frequency", xlab       = "Tax Amount", fill=I("blue"), col=I("red"), alpha=I(.2), xlim=c(5000,30000)) + 
+      theme(axis.text.y = element_text(angle=45))
+suppressWarnings(print(plt))
+```
+
+
